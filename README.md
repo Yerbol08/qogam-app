@@ -103,3 +103,8 @@ flutter build apk --debug
 Отчёт: [docs/DESIGN_AUDIT.md](docs/DESIGN_AUDIT.md). [Обзор обновлённых экранов](docs/design-review.png). Шрифт встроен в приложение; лицензия — assets/fonts/OFL.txt; исходник из https://github.com/google/fonts/tree/main/ofl/notosans .
 
 Итог: 12 тестов успешно; Flutter analyze без замечаний; dart format без изменений; debug APK собран. Проверены рендеры 9 экранов, вёрстка на 390×844 с текстом 200%, форма/карточка на 320×640 с текстом 200% и клавиатурой. В APK проверено наличие встроенного Noto Sans. Это UI/widget-проверки без сетевых плиток, не проверка картографического сервиса или физических устройств.
+# Контракт backend
+
+Подтверждённый адрес среды разработки: `http://10.8.0.53:8000`.
+Проверка Swagger и перечень недостающих API: [docs/BACKEND_CONTRACT.md](docs/BACKEND_CONTRACT.md).
+Текущее приложение использует DemoRepository; серверные методы обращений пока отсутствуют в опубликованном контракте.
