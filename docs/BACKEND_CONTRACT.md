@@ -1,5 +1,7 @@
 # Проверка backend — 6 октября 2026
 
+Полный запрос backend-разработчику для отправки: [BACKEND_REQUEST.md](BACKEND_REQUEST.md).
+
 Подтверждённый пользователем Base URL: `http://10.8.0.53:8000`.
 Swagger: http://10.8.0.53:8000/docs ; схема: `/openapi.json`.
 Проверена версия Qogam API `0.1.0`. Префикс методов — `/v1`.
