@@ -8,22 +8,31 @@ import 'ui.dart';
 import 'pages.dart';
 import 'detail.dart';
 import 'report_form.dart';
+import 'backend.dart';
+import 'backend_pages.dart';
+import 'backend_strings.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final p = await SharedPreferences.getInstance();
-  runApp(QogamApp(preferences: p, repository: DemoRepository(p)));
+  final api = QogamApi(
+    store: SecureSessionStore(QogamApi.defaultBaseUrl),
+    language: p.getString('language') ?? 'ru',
+  );
+  runApp(QogamApp(preferences: p, repository: DemoRepository(p), api: api));
 }
 
 class QogamApp extends StatefulWidget {
   final SharedPreferences preferences;
   final QogamRepository repository;
   final bool mapTilesEnabled;
+  final QogamApi? api;
   const QogamApp({
     super.key,
     required this.preferences,
     required this.repository,
     this.mapTilesEnabled = true,
+    this.api,
   });
   @override
   State<QogamApp> createState() => _QogamAppState();
@@ -41,11 +50,13 @@ class _QogamAppState extends State<QogamApp> {
     theme: qogamTheme(),
     home: Home(
       repository: widget.repository,
+      api: widget.api,
       tilesEnabled: widget.mapTilesEnabled,
       s: Strings(language),
       changeLanguage: () async {
         final next = language == 'ru' ? 'kk' : 'ru';
         await widget.preferences.setString('language', next);
+        widget.api?.language = next;
         setState(() => language = next);
       },
     ),
@@ -57,12 +68,14 @@ class Home extends StatefulWidget {
   final Strings s;
   final VoidCallback changeLanguage;
   final bool tilesEnabled;
+  final QogamApi? api;
   const Home({
     super.key,
     required this.repository,
     required this.s,
     required this.changeLanguage,
     this.tilesEnabled = true,
+    this.api,
   });
   @override
   State<Home> createState() => _HomeState();
@@ -176,7 +189,9 @@ class _HomeState extends State<Home> {
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
-              s.t('demo'),
+              tab == 3 && widget.api != null
+                  ? BackendStrings(s.language).t('live')
+                  : s.t('demo'),
               style: const TextStyle(
                 color: teal,
                 fontSize: 11,
@@ -224,7 +239,15 @@ class _HomeState extends State<Home> {
                   onOpen: openProblem,
                 ),
                 HouseView(s: s),
-                ProfileView(s: s, changeLanguage: widget.changeLanguage),
+                if (widget.api != null)
+                  BackendProfile(
+                    api: widget.api!,
+                    s: s,
+                    changeLanguage: widget.changeLanguage,
+                    tilesEnabled: widget.tilesEnabled,
+                  )
+                else
+                  ProfileView(s: s, changeLanguage: widget.changeLanguage),
               ],
             ),
       bottomNavigationBar: Container(
