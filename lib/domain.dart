@@ -144,6 +144,8 @@ class DemoRepository implements QogamRepository {
       latitude: 51.1282,
       longitude: 71.4295,
       title: 'Яма у перехода',
+      description:
+          'Демонстрационный пример: рядом с пешеходным переходом повреждён асфальт. После дождя углубление заполняется водой, и его сложно заметить.',
       address: 'Астана, ул. Достык, 13',
       category: Category.roads,
       status: 'progress',
@@ -156,6 +158,8 @@ class DemoRepository implements QogamRepository {
       latitude: 51.1252,
       longitude: 71.4218,
       title: 'Не горит фонарь',
+      description:
+          'Демонстрационный пример: фонарь у дорожки не освещает проход вечером. Просим проверить светильник и восстановить освещение.',
       address: 'Астана, ул. Сауран, 7',
       category: Category.lighting,
       status: 'published',
@@ -168,6 +172,8 @@ class DemoRepository implements QogamRepository {
       latitude: 51.1311,
       longitude: 71.4341,
       title: 'Убрали мусор во дворе',
+      description:
+          'Демонстрационный пример завершённой проблемы: мусор возле контейнерной площадки убран. Статус и история показаны для знакомства с приложением.',
       address: 'Астана, ул. Достык, 15',
       category: Category.waste,
       status: 'resolved',

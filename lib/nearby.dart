@@ -4,6 +4,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'domain.dart';
 import 'strings.dart';
+import 'ui.dart';
 
 const _teal = Color(0xff087f75);
 const _ink = Color(0xff172c29);
@@ -39,7 +40,14 @@ class Nearby extends StatefulWidget {
 class _NearbyState extends State<Nearby> {
   Category? category;
   String query = '';
+  final search = TextEditingController();
   bool map = true;
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
   Strings get s => widget.s;
   List<Problem> get filtered => widget.problems
       .where(
@@ -105,11 +113,22 @@ class _NearbyState extends State<Nearby> {
         ),
         const SizedBox(height: 12),
         TextField(
+          controller: search,
           onChanged: (value) => setState(() => query = value),
           decoration: InputDecoration(
             hintText: s.t('search'),
             hintStyle: const TextStyle(fontSize: 14, color: _muted),
             prefixIcon: const Icon(Icons.search_rounded, color: _muted),
+            suffixIcon: query.isEmpty
+                ? null
+                : IconButton(
+                    tooltip: s.t('clearSearch'),
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () {
+                      search.clear();
+                      setState(() => query = '');
+                    },
+                  ),
             contentPadding: const EdgeInsets.symmetric(
               vertical: 14,
               horizontal: 16,
@@ -246,9 +265,10 @@ class _NearbyState extends State<Nearby> {
         ),
         const SizedBox(height: 14),
         if (items.isEmpty)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24),
-            child: Center(child: Text(s.t('empty'))),
+          EmptyState(
+            icon: Icons.search_off_rounded,
+            title: s.t('empty'),
+            body: s.t('noResultsBody'),
           ),
         ...items.map(
           (p) => ProblemTile(
@@ -278,11 +298,6 @@ class ProblemTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = problem;
-    final statusColor = p.status == 'resolved'
-        ? const Color(0xff167653)
-        : p.status == 'progress'
-        ? const Color(0xff1263ab)
-        : const Color(0xff875a13);
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Material(
@@ -352,24 +367,7 @@ class ProblemTile extends StatelessWidget {
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 9,
-                        vertical: 5,
-                      ),
-                      decoration: BoxDecoration(
-                        color: statusColor.withValues(alpha: .08),
-                        borderRadius: BorderRadius.circular(7),
-                      ),
-                      child: Text(
-                        s.t(p.status),
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: statusColor,
-                        ),
-                      ),
-                    ),
+                    StatusBadge(p.status, s),
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
@@ -401,12 +399,16 @@ class ProblemMap extends StatefulWidget {
   final Strings s;
   final ValueChanged<Problem> onOpen;
   final bool tilesEnabled;
+  final ValueChanged<LatLng>? onPick;
+  final LatLng? selectedPoint;
   const ProblemMap({
     super.key,
     required this.problems,
     required this.s,
     required this.onOpen,
     this.tilesEnabled = true,
+    this.onPick,
+    this.selectedPoint,
   });
   @override
   State<ProblemMap> createState() => _ProblemMapState();
@@ -416,6 +418,7 @@ class _ProblemMapState extends State<ProblemMap> {
   static const center = LatLng(51.128, 71.428);
   final controller = MapController();
   bool failed = false;
+  int retry = 0;
   @override
   void dispose() {
     controller.dispose();
@@ -433,8 +436,8 @@ class _ProblemMapState extends State<ProblemMap> {
   }
 
   Widget control(IconData icon, String label, VoidCallback onTap) => SizedBox(
-    width: 44,
-    height: 44,
+    width: 48,
+    height: 48,
     child: Material(
       color: Colors.white,
       borderRadius: BorderRadius.circular(13),
@@ -456,19 +459,29 @@ class _ProblemMapState extends State<ProblemMap> {
         children: [
           FlutterMap(
             mapController: controller,
-            options: const MapOptions(
-              initialCenter: center,
+            options: MapOptions(
+              initialCenter: widget.selectedPoint ?? center,
+              onTap: widget.onPick == null
+                  ? null
+                  : (_, point) => widget.onPick!(point),
               initialZoom: 14,
               minZoom: 10,
               maxZoom: 18,
               backgroundColor: Color(0xffe5eee7),
               interactionOptions: InteractionOptions(
-                flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+                flags:
+                    InteractiveFlag.all &
+                    ~InteractiveFlag.rotate &
+                    (widget.onPick == null
+                        ? InteractiveFlag.all
+                        : ~(InteractiveFlag.doubleTapZoom |
+                              InteractiveFlag.doubleTapDragZoom)),
               ),
             ),
             children: [
               if (widget.tilesEnabled)
                 TileLayer(
+                  key: ValueKey(retry),
                   urlTemplate: const String.fromEnvironment(
                     'MAP_TILE_URL',
                     defaultValue:
@@ -479,6 +492,17 @@ class _ProblemMapState extends State<ProblemMap> {
                 ),
               MarkerLayer(
                 markers: [
+                  if (widget.selectedPoint != null)
+                    Marker(
+                      point: widget.selectedPoint!,
+                      width: 48,
+                      height: 48,
+                      child: const Icon(
+                        Icons.location_pin,
+                        color: _teal,
+                        size: 48,
+                      ),
+                    ),
                   for (final p in widget.problems)
                     if (p.latitude != null && p.longitude != null)
                       Marker(
@@ -613,14 +637,58 @@ class _ProblemMapState extends State<ProblemMap> {
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Text(
-                  widget.s.t('mapError'),
-                  style: const TextStyle(fontSize: 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.s.t(
+                          widget.onPick == null
+                              ? 'mapError'
+                              : 'mapLocationError',
+                        ),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => setState(() {
+                        failed = false;
+                        retry++;
+                      }),
+                      child: Text(widget.s.t('retry')),
+                    ),
+                  ],
                 ),
               ),
             ),
         ],
       ),
     ),
+  );
+}
+
+class LocationPicker extends StatelessWidget {
+  final Strings s;
+  final double? latitude, longitude;
+  final bool tilesEnabled;
+  final ValueChanged<LatLng> onPick;
+  const LocationPicker({
+    super.key,
+    required this.s,
+    required this.onPick,
+    this.latitude,
+    this.longitude,
+    this.tilesEnabled = true,
+  });
+  @override
+  Widget build(BuildContext context) => ProblemMap(
+    key: const Key('location-map'),
+    problems: const [],
+    s: s,
+    tilesEnabled: tilesEnabled,
+    selectedPoint: latitude == null || longitude == null
+        ? null
+        : LatLng(latitude!, longitude!),
+    onOpen: (_) {},
+    onPick: onPick,
   );
 }
