@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart';
 import 'domain.dart';
 import 'strings.dart';
+import 'nearby.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,10 +17,12 @@ const teal = Color(0xff087f75);
 class QogamApp extends StatefulWidget {
   final SharedPreferences preferences;
   final QogamRepository repository;
+  final bool mapTilesEnabled;
   const QogamApp({
     super.key,
     required this.preferences,
     required this.repository,
+    this.mapTilesEnabled = true,
   });
   @override
   State<QogamApp> createState() => _QogamAppState();
@@ -46,22 +49,66 @@ class _QogamAppState extends State<QogamApp> {
         bodyColor: const Color(0xff172c29),
         displayColor: const Color(0xff172c29),
       ),
-      appBarTheme: const AppBarTheme(backgroundColor: Colors.white),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xfff5f8f7),
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        indicatorColor: const Color(0xffe0f2eb),
+        height: 72,
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 11,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w700
+                : FontWeight.w500,
+            color: states.contains(WidgetState.selected)
+                ? teal
+                : const Color(0xff5c706a),
+          ),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: Colors.white,
+        selectedColor: teal,
+        side: const BorderSide(color: Color(0xffdce6e1)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        labelStyle: const TextStyle(fontSize: 12),
+        secondaryLabelStyle: const TextStyle(color: Colors.white),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+      ),
       cardTheme: CardThemeData(
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           side: const BorderSide(color: Color(0xffdce6e1)),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+        contentPadding: const EdgeInsets.all(16),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xffdce6e1)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xffdce6e1)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: teal, width: 1.5),
+        ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(48),
+          minimumSize: const Size.fromHeight(54),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(14),
           ),
@@ -70,6 +117,7 @@ class _QogamAppState extends State<QogamApp> {
     ),
     home: Home(
       repository: widget.repository,
+      tilesEnabled: widget.mapTilesEnabled,
       s: Strings(language),
       changeLanguage: () async {
         final next = language == 'ru' ? 'kk' : 'ru';
@@ -119,11 +167,13 @@ class Home extends StatefulWidget {
   final QogamRepository repository;
   final Strings s;
   final VoidCallback changeLanguage;
+  final bool tilesEnabled;
   const Home({
     super.key,
     required this.repository,
     required this.s,
     required this.changeLanguage,
+    this.tilesEnabled = true,
   });
   @override
   State<Home> createState() => _HomeState();
@@ -131,7 +181,6 @@ class Home extends StatefulWidget {
 
 class _HomeState extends State<Home> {
   int tab = 0;
-  Category? category;
   List<Problem> public = [], own = [];
   Set<String> joined = {};
   Draft? draft;
@@ -225,67 +274,61 @@ class _HomeState extends State<Home> {
       ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
     ),
   );
-  Widget tile(Problem p) => Panel(
-    child: InkWell(
-      onTap: () async {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                Detail(problem: p, repository: widget.repository, s: s),
-          ),
-        );
-        await refresh();
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.location_on_outlined, color: teal),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  p.title,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(p.address),
-          if (p.description.isNotEmpty) Text(p.description),
-          Text(
-            DateFormat.yMMMd(s.language).add_Hm().format(p.createdAt.toLocal()),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            children: [
-              StatusBadge(p.status, s),
-              Text(
-                '${p.supporters + (joined.contains(p.id) ? 1 : 0)} ${s.t('residents')}',
-              ),
-            ],
-          ),
-        ],
+  Future<void> openProblem(Problem p) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Detail(problem: p, repository: widget.repository, s: s),
       ),
-    ),
+    );
+    await refresh();
+  }
+
+  Widget tile(Problem p) => ProblemTile(
+    problem: p,
+    s: s,
+    joined: joined.contains(p.id),
+    onTap: () => openProblem(p),
   );
   @override
   Widget build(BuildContext context) {
     final keys = ['near', 'mine', 'home', 'profile'];
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'qogam',
-          style: TextStyle(fontWeight: FontWeight.bold),
+        title: const Row(
+          children: [
+            Icon(Icons.hub_rounded, color: teal, size: 28),
+            SizedBox(width: 9),
+            Flexible(
+              child: Text(
+                'qogam',
+                maxLines: 1,
+                overflow: TextOverflow.fade,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 25,
+                  letterSpacing: -1,
+                ),
+              ),
+            ),
+          ],
         ),
         actions: [
-          Chip(label: Text(s.t('demo'))),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xffe0f2eb),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Text(
+              s.t('demo'),
+              style: const TextStyle(
+                color: teal,
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
           TextButton(
             onPressed: widget.changeLanguage,
             child: Text(s.language == 'ru' ? 'Қаз' : 'Рус'),
@@ -298,6 +341,14 @@ class _HomeState extends State<Home> {
           ? Center(
               child: TextButton(onPressed: refresh, child: Text(s.t('retry'))),
             )
+          : tab == 0
+          ? Nearby(
+              problems: public,
+              joined: joined,
+              s: s,
+              onOpen: openProblem,
+              tilesEnabled: widget.tilesEnabled,
+            )
           : ListView(
               padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
               children: [
@@ -309,43 +360,6 @@ class _HomeState extends State<Home> {
                   ),
                 ),
                 ...switch (tab) {
-                  0 => [
-                    heading('near'),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          ChoiceChip(
-                            label: Text(s.t('all')),
-                            selected: category == null,
-                            onSelected: (_) => setState(() => category = null),
-                          ),
-                          ...Category.values.map(
-                            (c) => Padding(
-                              padding: const EdgeInsets.only(left: 8),
-                              child: ChoiceChip(
-                                label: Text(s.t(c.name)),
-                                selected: category == c,
-                                onSelected: (_) => setState(() => category = c),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    if (public
-                        .where(
-                          (p) => category == null || category == p.category,
-                        )
-                        .isEmpty)
-                      Text(s.t('empty')),
-                    ...public
-                        .where(
-                          (p) => category == null || category == p.category,
-                        )
-                        .map(tile),
-                  ],
                   1 => [
                     heading('mine'),
                     if (draft != null &&
@@ -440,31 +454,50 @@ class _HomeState extends State<Home> {
                 },
               ],
             ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: tab,
-        onDestinationSelected: (i) => setState(() => tab = i),
-        destinations: List.generate(
-          4,
-          (i) => NavigationDestination(
-            icon: Icon(
-              [
-                Icons.location_on_outlined,
-                Icons.assignment_outlined,
-                Icons.apartment_outlined,
-                Icons.person_outline,
-              ][i],
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Color(0xffe7eeea))),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (tab < 2)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
+                child: FilledButton(
+                  onPressed: form,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.add_circle_outline_rounded, size: 20),
+                      const SizedBox(width: 8),
+                      Flexible(child: Text(s.t('report'))),
+                    ],
+                  ),
+                ),
+              ),
+            NavigationBar(
+              selectedIndex: tab,
+              onDestinationSelected: (i) => setState(() => tab = i),
+              destinations: List.generate(
+                4,
+                (i) => NavigationDestination(
+                  icon: Icon(
+                    [
+                      Icons.location_on_outlined,
+                      Icons.assignment_outlined,
+                      Icons.apartment_outlined,
+                      Icons.person_outline,
+                    ][i],
+                  ),
+                  label: s.t(keys[i]),
+                ),
+              ),
             ),
-            label: s.t(keys[i]),
-          ),
+          ],
         ),
       ),
-      floatingActionButton: tab < 2
-          ? FloatingActionButton.extended(
-              onPressed: form,
-              icon: const Icon(Icons.add),
-              label: Text(s.t('report')),
-            )
-          : null,
     );
   }
 }

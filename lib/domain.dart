@@ -70,6 +70,7 @@ class Problem {
   final String id, title, address, status;
   final String description;
   final DateTime createdAt;
+  final double? latitude, longitude;
   final Category category;
   final int supporters;
   final bool published;
@@ -81,6 +82,8 @@ class Problem {
     required this.category,
     this.description = '',
     DateTime? createdAt,
+    this.latitude,
+    this.longitude,
     this.status = 'pending',
     this.supporters = 0,
     this.published = false,
@@ -97,11 +100,15 @@ class Problem {
     'history': history,
     'description': description,
     'createdAt': createdAt.toIso8601String(),
+    'lat': latitude,
+    'lon': longitude,
   };
   factory Problem.fromJson(Map<String, dynamic> j) => Problem(
     id: j['id'],
     title: j['title'],
     description: j['description'] ?? '',
+    latitude: (j['lat'] as num?)?.toDouble(),
+    longitude: (j['lon'] as num?)?.toDouble(),
     createdAt: j['createdAt'] == null ? null : DateTime.parse(j['createdAt']),
     address: j['address'],
     category: Category.values.byName(j['category']),
@@ -134,6 +141,8 @@ class DemoRepository implements QogamRepository {
   static final seeds = [
     Problem(
       id: 'DEMO-101',
+      latitude: 51.1282,
+      longitude: 71.4295,
       title: 'Яма у перехода',
       address: 'Астана, ул. Достык, 13',
       category: Category.roads,
@@ -144,6 +153,8 @@ class DemoRepository implements QogamRepository {
     ),
     Problem(
       id: 'DEMO-102',
+      latitude: 51.1252,
+      longitude: 71.4218,
       title: 'Не горит фонарь',
       address: 'Астана, ул. Сауран, 7',
       category: Category.lighting,
@@ -154,6 +165,8 @@ class DemoRepository implements QogamRepository {
     ),
     Problem(
       id: 'DEMO-103',
+      latitude: 51.1311,
+      longitude: 71.4341,
       title: 'Убрали мусор во дворе',
       address: 'Астана, ул. Достык, 15',
       category: Category.waste,
@@ -226,6 +239,8 @@ class DemoRepository implements QogamRepository {
       title: String.fromCharCodes(draft.description.trim().runes.take(120)),
       description: draft.description.trim(),
       createdAt: DateTime.now().toUtc(),
+      latitude: draft.latitude,
+      longitude: draft.longitude,
       address: draft.address,
       category: draft.category!,
     );

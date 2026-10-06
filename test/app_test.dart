@@ -4,6 +4,8 @@ import 'package:qogam/domain.dart';
 import 'package:qogam/strings.dart';
 import 'package:qogam/main.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:qogam/nearby.dart';
 
 Draft valid() => Draft(
   category: Category.roads,
@@ -15,6 +17,57 @@ Draft valid() => Draft(
   consent: true,
 );
 void main() {
+  testWidgets('Map and list share filters; marker opens published problem', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Nearby(
+            problems: DemoRepository.seeds,
+            joined: const {},
+            s: const Strings('ru'),
+            tilesEnabled: false,
+            onOpen: (p) => opened.add(p.id),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(FlutterMap), findsOneWidget);
+    expect(
+      tester.widget<MarkerLayer>(find.byType(MarkerLayer)).markers,
+      hasLength(3),
+    );
+    await tester.ensureVisible(find.text('Дороги'));
+    await tester.tap(find.text('Дороги'));
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<MarkerLayer>(find.byType(MarkerLayer)).markers,
+      hasLength(1),
+    );
+    final markerIcon = find.descendant(
+      of: find.byType(MarkerLayer),
+      matching: find.byIcon(Icons.construction_rounded),
+    );
+    await tester.ensureVisible(markerIcon);
+    await tester.tap(markerIcon);
+    await tester.pumpAndSettle();
+    expect(opened, ['DEMO-101']);
+    tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position
+        .jumpTo(0);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Список'));
+    await tester.pumpAndSettle();
+    expect(find.byType(FlutterMap), findsNothing);
+    expect(find.byType(ProblemTile), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'несуществующая проблема');
+    await tester.pumpAndSettle();
+    expect(find.text('Пока ничего нет'), findsOneWidget);
+  });
   testWidgets('Mobile layout with Kazakh and 200 percent text', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -27,7 +80,11 @@ void main() {
     SharedPreferences.setMockInitialValues({'language': 'kk'});
     final p = await SharedPreferences.getInstance();
     await tester.pumpWidget(
-      QogamApp(preferences: p, repository: DemoRepository(p)),
+      QogamApp(
+        mapTilesEnabled: false,
+        preferences: p,
+        repository: DemoRepository(p),
+      ),
     );
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -47,7 +104,9 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final p = await SharedPreferences.getInstance();
     final repository = DemoRepository(p);
-    await tester.pumpWidget(QogamApp(preferences: p, repository: repository));
+    await tester.pumpWidget(
+      QogamApp(mapTilesEnabled: false, preferences: p, repository: repository),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Сообщить о проблеме'));
     await tester.pumpAndSettle();
@@ -159,7 +218,11 @@ void main() {
   testWidgets('Navigation and language switch', (tester) async {
     final p = await SharedPreferences.getInstance();
     await tester.pumpWidget(
-      QogamApp(preferences: p, repository: DemoRepository(p)),
+      QogamApp(
+        mapTilesEnabled: false,
+        preferences: p,
+        repository: DemoRepository(p),
+      ),
     );
     await tester.pumpAndSettle();
     expect(find.text('qogam'), findsOneWidget);
