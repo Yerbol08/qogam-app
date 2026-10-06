@@ -11,17 +11,20 @@ class ApiException implements Exception {
   final String kind;
   final List<String> fields;
   final int? retryAfter;
+  final String? code, requestId;
   const ApiException(
     this.status,
     this.kind, {
     this.fields = const [],
     this.retryAfter,
+    this.code,
+    this.requestId,
   });
 }
 
 class ApiUser {
   final String id, locale, role;
-  final String? phone, name, city;
+  final String? phone, name, city, consentVersion;
   final DateTime createdAt;
   ApiUser.fromJson(Json j)
     : id = j['id'],
@@ -30,6 +33,7 @@ class ApiUser {
       phone = j['phone'],
       name = j['display_name'],
       city = j['city_code'],
+      consentVersion = j['consent_version'],
       createdAt = DateTime.parse(j['created_at']);
 }
 
@@ -59,16 +63,37 @@ class ApiMeta {
 
 class ApiPlace {
   final String id, label;
+  final String? name, address, city;
+  final bool notificationsEnabled;
   final double latitude, longitude;
   final int radius;
   final DateTime createdAt;
   ApiPlace.fromJson(Json j)
     : id = j['id'],
       label = j['label'],
+      name = j['name'],
+      address = j['address_text'],
+      city = j['city_code'],
+      notificationsEnabled = j['notifications_enabled'] ?? true,
       latitude = (j['location']['lat'] as num).toDouble(),
       longitude = (j['location']['lng'] as num).toDouble(),
       radius = j['radius_m'],
       createdAt = DateTime.parse(j['created_at']);
+}
+
+class ApiConsent {
+  final String purpose;
+  final bool required, granted;
+  final String? version;
+  final DateTime? grantedAt;
+  ApiConsent.fromJson(Json j)
+    : purpose = j['purpose'],
+      required = j['required'],
+      granted = j['granted'],
+      version = j['version'],
+      grantedAt = j['granted_at'] == null
+          ? null
+          : DateTime.parse(j['granted_at']);
 }
 
 class ApiSession {
@@ -125,7 +150,7 @@ class SecureSessionStore implements SessionStore {
   Future<void> clear() => storage.delete(key: key);
 }
 
-/// All routes from Qogam API 0.1.0. No demo fallback or logging of credentials.
+/// All routes from Qogam API 0.2.0. No demo fallback or logging of credentials.
 class QogamApi extends ChangeNotifier {
   static const defaultBaseUrl = String.fromEnvironment(
     'QOGAM_API_URL',
@@ -237,6 +262,13 @@ class QogamApi extends ChangeNotifier {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final fields = <String>[];
+      if (data is Map && data['field_errors'] is List) {
+        for (final error in data['field_errors']) {
+          if (error is Map && error['field'] is String) {
+            fields.add(error['field'] as String);
+          }
+        }
+      }
       if (data is Map && data['detail'] is List) {
         for (final error in data['detail']) {
           if (error is Map && error['loc'] is List) {
@@ -250,7 +282,13 @@ class QogamApi extends ChangeNotifier {
         response.statusCode,
         'http',
         fields: fields,
-        retryAfter: int.tryParse(response.headers['retry-after'] ?? ''),
+        retryAfter:
+            int.tryParse(response.headers['retry-after'] ?? '') ??
+            (data is Map ? data['retry_after'] as int? : null),
+        code: data is Map ? data['code'] as String? : null,
+        requestId:
+            response.headers['x-request-id'] ??
+            (data is Map ? data['request_id'] as String? : null),
       );
     }
     return data;
@@ -352,14 +390,14 @@ class QogamApi extends ChangeNotifier {
     );
     await _save(ApiSession.fromTokens(j as Json, now()));
   });
-  Future<void> logout() => _serial(() async {
+  Future<void> logout({String? pushToken}) => _serial(() async {
     final value = _session;
     if (value != null) {
       try {
         await _send(
           'POST',
           '/v1/auth/logout',
-          body: {'refresh_token': value.refresh},
+          body: {'refresh_token': value.refresh, 'push_token': ?pushToken},
         );
       } on ApiException catch (e) {
         if (e.status != 401) rethrow;
@@ -372,7 +410,13 @@ class QogamApi extends ChangeNotifier {
     await _save(_session!.withUser(j));
     return ApiUser.fromJson(j);
   });
-  Future<ApiUser> patchMe({String? name, String? locale}) async {
+  Future<ApiUser> patchMe({
+    String? name,
+    String? locale,
+    String? cityCode,
+    bool clearName = false,
+    bool clearCity = false,
+  }) async {
     if (name != null &&
         (name.trim().runes.isEmpty || name.trim().runes.length > 64)) {
       throw const ApiException(422, 'name');
@@ -386,7 +430,10 @@ class QogamApi extends ChangeNotifier {
                 'PATCH',
                 '/v1/me',
                 body: {
-                  if (name != null) 'display_name': name.trim(),
+                  if (clearName || name != null)
+                    'display_name': clearName ? null : name!.trim(),
+                  if (clearCity || cityCode != null)
+                    'city_code': clearCity ? null : cityCode,
                   'locale': ?locale,
                 },
               )
@@ -427,8 +474,13 @@ class QogamApi extends ChangeNotifier {
     required double latitude,
     required double longitude,
     int radius = 300,
+    String? name,
+    String? address,
+    bool notificationsEnabled = true,
   }) async {
-    if (!['home', 'work', 'other'].contains(label) ||
+    if ((name != null && name.runes.length > 64) ||
+        (address != null && address.runes.length > 300) ||
+        !['home', 'work', 'other'].contains(label) ||
         !latitude.isFinite ||
         !longitude.isFinite ||
         latitude < -90 ||
@@ -447,7 +499,64 @@ class QogamApi extends ChangeNotifier {
               'label': label,
               'location': {'lat': latitude, 'lng': longitude},
               'radius_m': radius,
+              'name': ?name,
+              'address_text': ?address,
+              'notifications_enabled': notificationsEnabled,
             },
+          )
+          as Json,
+    );
+  }
+
+  Future<List<ApiConsent>> consents() async =>
+      (await _authorized('GET', '/v1/me/consents') as List)
+          .map((j) => ApiConsent.fromJson(j as Json))
+          .toList();
+  Future<List<ApiConsent>> putConsent(
+    String purpose, {
+    required bool granted,
+    required String version,
+  }) async {
+    if (!['processing', 'gov_transfer', 'push'].contains(purpose) ||
+        version.isEmpty ||
+        version.length > 32 ||
+        (purpose == 'processing' && !granted)) {
+      throw const ApiException(422, 'consent');
+    }
+    return (await _authorized(
+              'PUT',
+              '/v1/me/consents/$purpose',
+              body: {'granted': granted, 'version': version},
+            )
+            as List)
+        .map((j) => ApiConsent.fromJson(j as Json))
+        .toList();
+  }
+
+  Future<void> deleteDevice(String token) async {
+    if (token.length < 8 || token.length > 512) {
+      throw const ApiException(422, 'deviceValidation');
+    }
+    await _authorized('DELETE', '/v1/me/devices', body: {'push_token': token});
+  }
+
+  Future<ApiPlace> patchPlace(String id, Json changes) async {
+    const allowed = [
+      'label',
+      'name',
+      'address_text',
+      'location',
+      'radius_m',
+      'notifications_enabled',
+    ];
+    if (changes.keys.any((k) => !allowed.contains(k))) {
+      throw const ApiException(422, 'place');
+    }
+    return ApiPlace.fromJson(
+      await _authorized(
+            'PATCH',
+            '/v1/me/places/${Uri.encodeComponent(id)}',
+            body: changes,
           )
           as Json,
     );

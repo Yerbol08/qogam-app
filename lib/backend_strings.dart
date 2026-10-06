@@ -6,6 +6,10 @@ class BackendStrings {
   String t(String key) => (language == 'kk' ? kk : ru)[key] ?? key;
   String error(Object error) {
     if (error is! ApiException) return t('unexpected');
+    if (error.code == 'auth.consent_required') return t('consent');
+    if (error.code == 'auth.invalid_code' || error.code == 'auth.otp_expired') {
+      return t('badCode');
+    }
     if (error.kind != 'http') return t(error.kind);
     return switch (error.status) {
       400 => t('invalidRequest'),
@@ -21,6 +25,14 @@ class BackendStrings {
   }
 
   static const ru = {
+    'cityCode': 'Код города (из справочника)',
+    'addressLabel': 'Адрес',
+    'notificationsOn': 'Уведомления для места включены',
+    'notificationsOff': 'Уведомления для места выключены',
+    'unbindDevice': 'Отключить push-токен',
+    'requiredConsentNote':
+        'Обязательное согласие можно отозвать удалением аккаунта в профиле.',
+    'acceptCurrentConsent': 'Принять текущую версию',
     'invalidRequest': 'Проверьте данные и повторите запрос.',
     'badCode':
         'Код неверный или истёк. Проверьте SMS либо запросите новый код.',
@@ -112,6 +124,14 @@ class BackendStrings {
     'unexpected': 'Не удалось выполнить действие. Попробуйте ещё раз.',
   };
   static const kk = {
+    'cityCode': 'Қала коды (анықтамалықтан)',
+    'addressLabel': 'Мекенжай',
+    'notificationsOn': 'Орын хабарламалары қосылған',
+    'notificationsOff': 'Орын хабарламалары өшірілген',
+    'unbindDevice': 'Push токенін ажырату',
+    'requiredConsentNote':
+        'Міндетті келісімді қайтарып алу үшін профильде аккаунтты жойыңыз.',
+    'acceptCurrentConsent': 'Ағымдағы нұсқаны қабылдау',
     'invalidRequest': 'Деректерді тексеріп, сұрауды қайталаңыз.',
     'badCode':
         'Код қате немесе мерзімі өткен. SMS тексеріңіз немесе жаңа код сұратыңыз.',

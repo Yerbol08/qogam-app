@@ -211,6 +211,11 @@ class _BackendProfileState extends State<BackendProfile> {
             ),
           ),
           tile(
+            Icons.fact_check_outlined,
+            'consentsTitle',
+            () => open(ConsentsPage(api: widget.api, b: b)),
+          ),
+          tile(
             Icons.download_outlined,
             'export',
             () => open(ExportPage(api: widget.api, b: b)),
@@ -532,6 +537,7 @@ class EditProfilePage extends StatefulWidget {
 
 class _EditProfilePageState extends State<EditProfilePage> {
   late final name = TextEditingController(text: widget.user.name ?? '');
+  late final city = TextEditingController(text: widget.user.city ?? '');
   late String locale = ['ru', 'kk'].contains(widget.user.locale)
       ? widget.user.locale
       : widget.b.language;
@@ -540,6 +546,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
   @override
   void dispose() {
     name.dispose();
+    city.dispose();
     super.dispose();
   }
 
@@ -554,6 +561,12 @@ class _EditProfilePageState extends State<EditProfilePage> {
           enabled: !busy,
           maxLength: 64,
           decoration: InputDecoration(labelText: widget.b.t('nameLabel')),
+        ),
+        TextField(
+          controller: city,
+          enabled: !busy,
+          maxLength: 32,
+          decoration: InputDecoration(labelText: widget.b.t('cityCode')),
         ),
         const SizedBox(height: 16),
         DropdownButtonFormField<String>(
@@ -576,7 +589,15 @@ class _EditProfilePageState extends State<EditProfilePage> {
                     error = null;
                   });
                   try {
-                    await widget.api.patchMe(name: name.text, locale: locale);
+                    await widget.api.patchMe(
+                      name: name.text.trim().isEmpty ? null : name.text,
+                      clearName: name.text.trim().isEmpty,
+                      locale: locale,
+                      cityCode: city.text.trim().isEmpty
+                          ? null
+                          : city.text.trim(),
+                      clearCity: city.text.trim().isEmpty,
+                    );
                     if (context.mounted) {
                       widget.onLocale(locale);
                       Navigator.pop(context);
@@ -737,11 +758,40 @@ class _PlacesPageState extends State<PlacesPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  widget.b.t(place.label),
+                  place.name ?? widget.b.t(place.label),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 Text(
                   '${place.latitude.toStringAsFixed(5)}, ${place.longitude.toStringAsFixed(5)} • ${place.radius} м',
+                ),
+                if (place.address != null) Text(place.address!),
+                if (place.city != null) Text(place.city!),
+                Text(
+                  widget.b.t(
+                    place.notificationsEnabled
+                        ? 'notificationsOn'
+                        : 'notificationsOff',
+                  ),
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.edit_outlined),
+                  label: Text(widget.b.t('edit')),
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final changed = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => AddPlacePage(
+                                api: widget.api,
+                                b: widget.b,
+                                tilesEnabled: widget.tilesEnabled,
+                                place: place,
+                              ),
+                            ),
+                          );
+                          if (changed == true) await load();
+                        },
                 ),
                 TextButton.icon(
                   onPressed: busy
@@ -805,34 +855,63 @@ class AddPlacePage extends StatefulWidget {
   final QogamApi api;
   final BackendStrings b;
   final bool tilesEnabled;
+  final ApiPlace? place;
   const AddPlacePage({
     super.key,
     required this.api,
     required this.b,
     this.tilesEnabled = true,
+    this.place,
   });
   @override
   State<AddPlacePage> createState() => _AddPlacePageState();
 }
 
 class _AddPlacePageState extends State<AddPlacePage> {
-  final radius = TextEditingController(text: '300');
-  String label = 'home';
-  double? lat, lng;
-  bool confirmed = false, busy = false;
+  late final radius = TextEditingController(
+    text: '${widget.place?.radius ?? 300}',
+  );
+  late final name = TextEditingController(text: widget.place?.name ?? '');
+  late final address = TextEditingController(text: widget.place?.address ?? '');
+  late String label = widget.place?.label ?? 'home';
+  late double? lat = widget.place?.latitude, lng = widget.place?.longitude;
+  late bool confirmed = widget.place != null;
+  late bool notifications = widget.place?.notificationsEnabled ?? true;
+  bool busy = false;
   String? error;
   @override
   void dispose() {
     radius.dispose();
+    name.dispose();
+    address.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(widget.b.t('addPlace'))),
+    appBar: AppBar(
+      title: Text(widget.b.t(widget.place == null ? 'addPlace' : 'edit')),
+    ),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
+        TextField(
+          controller: name,
+          enabled: !busy,
+          maxLength: 64,
+          decoration: InputDecoration(labelText: widget.b.t('nameLabel')),
+        ),
+        TextField(
+          controller: address,
+          enabled: !busy,
+          maxLength: 300,
+          decoration: InputDecoration(labelText: widget.b.t('addressLabel')),
+        ),
+        SwitchListTile(
+          title: Text(widget.b.t('notificationsOn')),
+          value: notifications,
+          onChanged: busy ? null : (v) => setState(() => notifications = v),
+        ),
         DropdownButtonFormField<String>(
           isExpanded: true,
           initialValue: label,
@@ -901,12 +980,30 @@ class _AddPlacePageState extends State<AddPlacePage> {
                     error = null;
                   });
                   try {
-                    await widget.api.createPlace(
-                      label: label,
-                      latitude: lat!,
-                      longitude: lng!,
-                      radius: int.parse(radius.text),
-                    );
+                    if (widget.place != null) {
+                      await widget.api.patchPlace(widget.place!.id, {
+                        'label': label,
+                        'name': name.text.trim().isEmpty
+                            ? null
+                            : name.text.trim(),
+                        'address_text': address.text.trim().isEmpty
+                            ? null
+                            : address.text.trim(),
+                        'location': {'lat': lat!, 'lng': lng!},
+                        'radius_m': int.parse(radius.text),
+                        'notifications_enabled': notifications,
+                      });
+                    } else {
+                      await widget.api.createPlace(
+                        label: label,
+                        latitude: lat!,
+                        longitude: lng!,
+                        radius: int.parse(radius.text),
+                        name: name.text.trim(),
+                        address: address.text.trim(),
+                        notificationsEnabled: notifications,
+                      );
+                    }
                     if (context.mounted) Navigator.pop(context, true);
                   } catch (e) {
                     if (mounted) setState(() => error = widget.b.error(e));
@@ -1087,6 +1184,129 @@ class _DevicePageState extends State<DevicePage> {
                 },
           child: Text(widget.b.t(busy ? 'loading' : 'register')),
         ),
+        TextButton(
+          onPressed: busy
+              ? null
+              : () async {
+                  setState(() {
+                    busy = true;
+                    error = null;
+                  });
+                  try {
+                    await widget.api.deleteDevice(token.text.trim());
+                    if (context.mounted) Navigator.pop(context);
+                  } catch (e) {
+                    if (mounted) setState(() => error = widget.b.error(e));
+                  } finally {
+                    if (mounted) setState(() => busy = false);
+                  }
+                },
+          child: Text(widget.b.t('unbindDevice')),
+        ),
+      ],
+    ),
+  );
+}
+
+class ConsentsPage extends StatefulWidget {
+  final QogamApi api;
+  final BackendStrings b;
+  const ConsentsPage({super.key, required this.api, required this.b});
+  @override
+  State<ConsentsPage> createState() => _ConsentsPageState();
+}
+
+class _ConsentsPageState extends State<ConsentsPage> {
+  List<ApiConsent> values = [];
+  ApiMeta? meta;
+  bool busy = true;
+  String? error;
+  @override
+  void initState() {
+    super.initState();
+    load();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final m = await widget.api.meta();
+      final v = await widget.api.consents();
+      if (mounted) {
+        setState(() {
+          meta = m;
+          values = v;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = widget.b.error(e));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> update(ApiConsent consent, bool granted) async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final v = await widget.api.putConsent(
+        consent.purpose,
+        granted: granted,
+        version: meta!.consentVersion,
+      );
+      await widget.api.getMe();
+      if (mounted) setState(() => values = v);
+    } catch (e) {
+      if (mounted) setState(() => error = widget.b.error(e));
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: Text(widget.b.t('consentsTitle'))),
+    body: ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        if (busy) const LinearProgressIndicator(),
+        ApiErrorBox(error),
+        if (error != null)
+          TextButton(
+            onPressed: busy ? null : load,
+            child: Text(widget.b.t('retry')),
+          ),
+        if (meta != null)
+          Text('${widget.b.t('consentVersion')}: ${meta!.consentVersion}'),
+        Text(widget.b.t('requiredConsentNote')),
+        for (final consent in values)
+          Panel(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(widget.b.t(consent.purpose)),
+                  subtitle: Text(consent.version ?? '—'),
+                  value: consent.granted,
+                  onChanged: busy || consent.required
+                      ? null
+                      : (v) => update(consent, v),
+                ),
+                if (consent.required &&
+                    (!consent.granted ||
+                        consent.version != meta?.consentVersion))
+                  FilledButton(
+                    onPressed: busy ? null : () => update(consent, true),
+                    child: Text(widget.b.t('acceptCurrentConsent')),
+                  ),
+              ],
+            ),
+          ),
       ],
     ),
   );

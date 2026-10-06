@@ -64,6 +64,115 @@ Future<void> login(QogamApi api) =>
 
 void main() {
   test(
+    'API 0.2 consent, device removal, place patch and profile clearing',
+    () async {
+      final consent = {
+        'purpose': 'push',
+        'required': false,
+        'granted': true,
+        'version': 'v2',
+        'granted_at': '2026-10-06T00:00:00Z',
+      };
+      final seen = <String>[];
+      final api = QogamApi(
+        store: MemoryStore(),
+        client: MockClient((r) async {
+          final route = '${r.method} ${r.url.path}';
+          seen.add(route);
+          if (r.url.path.endsWith('/otp/verify')) return reply(tokens());
+          expect(r.headers['Authorization'], 'Bearer access1');
+          if (route == 'GET /v1/me/consents') return reply([consent]);
+          if (route == 'PUT /v1/me/consents/push') {
+            expect(jsonDecode(r.body), {'granted': true, 'version': 'v2'});
+            return reply([consent]);
+          }
+          if (route == 'DELETE /v1/me/devices') {
+            expect(jsonDecode(r.body), {'push_token': 'real-token'});
+            expect(r.url.query, isEmpty);
+            return http.Response('', 204);
+          }
+          if (route == 'PATCH /v1/me/places/place1') {
+            expect(jsonDecode(r.body), {
+              'name': null,
+              'notifications_enabled': false,
+            });
+            return reply({
+              ...placeJson,
+              'name': null,
+              'address_text': 'Address',
+              'city_code': 'astana',
+              'notifications_enabled': false,
+            });
+          }
+          expect(route, 'PATCH /v1/me');
+          expect(jsonDecode(r.body), {'display_name': null, 'city_code': null});
+          return reply({
+            ...userJson,
+            'display_name': null,
+            'city_code': null,
+            'consent_version': 'v2',
+          });
+        }),
+      );
+      addTearDown(api.dispose);
+      await login(api);
+      expect((await api.consents()).single.granted, true);
+      expect(
+        (await api.putConsent(
+          'push',
+          granted: true,
+          version: 'v2',
+        )).single.version,
+        'v2',
+      );
+      await api.deleteDevice('real-token');
+      final place = await api.patchPlace('place1', {
+        'name': null,
+        'notifications_enabled': false,
+      });
+      expect(place.notificationsEnabled, false);
+      expect(place.address, 'Address');
+      expect(
+        (await api.patchMe(clearName: true, clearCity: true)).consentVersion,
+        'v2',
+      );
+      expect(seen.length, 6);
+      await expectLater(
+        api.putConsent('processing', granted: false, version: 'v2'),
+        throwsA(isA<ApiException>()),
+      );
+    },
+  );
+  test('RFC 7807 errors preserve code, fields, retry and request ID', () async {
+    final api = QogamApi(
+      store: MemoryStore(),
+      client: MockClient(
+        (r) async => reply({
+          'title': 'Validation',
+          'status': 422,
+          'code': 'validation.failed',
+          'request_id': 'trace-1',
+          'retry_after': 12,
+          'field_errors': [
+            {'field': 'location.lat', 'code': 'invalid', 'message': 'Invalid'},
+          ],
+        }, 422),
+      ),
+    );
+    addTearDown(api.dispose);
+    await expectLater(
+      api.meta(),
+      throwsA(
+        isA<ApiException>()
+            .having((e) => e.code, 'code', 'validation.failed')
+            .having((e) => e.fields, 'fields', ['location.lat'])
+            .having((e) => e.requestId, 'request ID', 'trace-1')
+            .having((e) => e.retryAfter, 'retry', 12),
+      ),
+    );
+  });
+
+  test(
     'Failed logout or deletion preserves session for explicit retry',
     () async {
       final store = MemoryStore();
@@ -166,6 +275,24 @@ void main() {
           ]);
         }
         if (r.url.path.endsWith('/verify')) return reply(tokens());
+        if (r.url.path.endsWith('/consents')) {
+          return reply([
+            {
+              'purpose': 'processing',
+              'required': true,
+              'granted': true,
+              'version': 'v0',
+              'granted_at': null,
+            },
+            {
+              'purpose': 'push',
+              'required': false,
+              'granted': false,
+              'version': null,
+              'granted_at': null,
+            },
+          ]);
+        }
         if (r.url.path.endsWith('/places')) return reply([placeJson]);
         if (r.url.path.endsWith('/export')) {
           return reply({
@@ -188,6 +315,13 @@ void main() {
       PlacesPage(api: api, b: b, tilesEnabled: false),
       AddPlacePage(api: api, b: b, tilesEnabled: false),
       DevicePage(api: api, b: b),
+      ConsentsPage(api: api, b: b),
+      AddPlacePage(
+        api: api,
+        b: b,
+        tilesEnabled: false,
+        place: ApiPlace.fromJson(placeJson),
+      ),
       ExportPage(api: api, b: b),
       Scaffold(
         body: BackendProfile(
@@ -274,6 +408,7 @@ void main() {
                 'label': 'home',
                 'location': {'lat': 51.13, 'lng': 71.43},
                 'radius_m': 300,
+                'notifications_enabled': true,
               });
               return reply(placeJson, 201);
             case 'DELETE /v1/me/places/place1':
