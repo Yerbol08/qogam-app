@@ -1,3 +1,4 @@
+import 'package:qogam/api_contract.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qogam/backend.dart';
 
@@ -54,6 +55,53 @@ void main() {
                 )
                 as List;
         expect(legal, isNotEmpty);
+        final contract = ContractApi(api);
+        for (final entry in [
+          (
+            ApiContract.operation('GET', '/v1/alerts'),
+            <String, dynamic>{'city_code': 'astana'},
+          ),
+          (
+            ApiContract.operation('GET', '/v1/problems/similar'),
+            <String, dynamic>{
+              'category_code': 'roads.pothole',
+              'lat': 51.13,
+              'lng': 71.43,
+            },
+          ),
+        ]) {
+          final result = await contract.call(entry.$1, query: entry.$2);
+          expect(
+            ApiContract.validate(entry.$1.responseSchema!, result),
+            isEmpty,
+            reason: entry.$1.path,
+          );
+        }
+        // The server exposes the safe house list anonymously, although OpenAPI marks it secured.
+        final houses = await api.request(
+          'GET',
+          '/v1/houses',
+          query: {'city_code': 'astana', 'limit': '2'},
+        );
+        expect(
+          ApiContract.validate(
+            ApiContract.operation('GET', '/v1/houses').responseSchema!,
+            houses,
+          ),
+          isEmpty,
+        );
+        try {
+          final op = ApiContract.operation('GET', '/v1/geo/reverse');
+          final result = await contract.call(
+            op,
+            query: {'lat': 51.13, 'lng': 71.43, 'city_code': 'astana'},
+          );
+          expect(ApiContract.validate(op.responseSchema!, result), isEmpty);
+        } on ApiException catch (e) {
+          // No match is a valid geocoder outcome; unexpected failures must fail this test.
+          expect(e.status, 404);
+        }
+
         if ((page['items'] as List).isNotEmpty) {
           final id = page['items'][0]['id'];
           final card = await api.request('GET', '/v1/problems/$id') as Json;

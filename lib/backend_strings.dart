@@ -1,11 +1,15 @@
+import 'service_strings.dart';
 import 'backend.dart';
 
 class BackendStrings {
   final String language;
   const BackendStrings(this.language);
-  String t(String key) => (language == 'kk' ? kk : ru)[key] ?? key;
+  String t(String key) =>
+      (language == 'kk' ? kk : ru)[key] ?? ServiceStrings(language).t(key);
   String error(Object error) {
     if (error is! ApiException) return t('unexpected');
+    if (error.code == 'auth.mfa_required') return t('mfaNeeded');
+    if (error.code == 'auth.mfa_invalid') return t('badMfa');
     if (error.code == 'auth.consent_required') return t('consent');
     if (error.code == 'auth.invalid_code' || error.code == 'auth.otp_expired') {
       return t('badCode');
@@ -21,7 +25,7 @@ class BackendStrings {
       404 => t('notFound'),
       409 => t('conflict'),
       422 =>
-        '${t('validation')}${error.fields.isEmpty ? '' : ' (${error.fields.join(', ')})'}',
+        '${t('validation')}${error.fields.isEmpty ? '' : ' (${error.fields.map((field) => ServiceStrings(language).t(field.split('.').last)).join(', ')})'}',
       429 => t('rateLimit'),
       _ => t('serverError'),
     };

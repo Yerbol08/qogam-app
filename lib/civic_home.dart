@@ -1,3 +1,6 @@
+import 'api_contract.dart';
+import 'service_pages.dart';
+import 'service_strings.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -198,6 +201,20 @@ class _CivicHomeState extends State<CivicHome> {
     appBar: AppBar(
       title: const Text('qogam', style: TextStyle(fontWeight: FontWeight.w800)),
       actions: [
+        IconButton(
+          icon: const Icon(Icons.notifications_outlined),
+          tooltip: ServiceStrings(s.language).t('services'),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => ServiceCatalog(
+                api: widget.api,
+                strings: ServiceStrings(s.language),
+                city: city,
+              ),
+            ),
+          ),
+        ),
         Center(
           child: Text(s.t('server'), style: const TextStyle(color: teal)),
         ),
@@ -1019,6 +1036,24 @@ class _CivicHouseListState extends State<CivicHouseList> {
           child: ListTile(
             title: Text(house['address_text']),
             subtitle: Text(house['organization']?['name'] ?? ''),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              if (!await civicLogin(context, widget.api, widget.s) ||
+                  !context.mounted) {
+                return;
+              }
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ServiceEntityPage(
+                    api: widget.api,
+                    strings: ServiceStrings(widget.s.language),
+                    source: ApiContract.operation('GET', '/v1/houses'),
+                    item: house,
+                  ),
+                ),
+              );
+            },
           ),
         ),
     ],

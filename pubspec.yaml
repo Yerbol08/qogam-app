@@ -45,6 +45,8 @@ dependencies:
   flutter_secure_storage: ^11.2.0
   share_plus: ^13.3.1
   uuid: ^4.6.0
+  image_picker: ^1.2.4
+  http_parser: ^4.1.2
 
 dev_dependencies:
   flutter_test:

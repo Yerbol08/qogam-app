@@ -1,3 +1,7 @@
+import 'api_contract.dart';
+import 'media_attachments.dart';
+import 'service_strings.dart';
+import 'service_pages.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'backend.dart';
@@ -38,11 +42,13 @@ class _CivicFormState extends State<CivicForm> {
   late final address = TextEditingController(text: draft.address);
   CivicStrings get s => widget.s;
   int step = 0;
-  bool busy = false, leaveAllowed = false;
+  bool busy = false, leaveAllowed = false, photoBusy = false;
   String? error, saveError;
   Timer? debounce;
   Future<void> writes = Future.value();
   List<Json> addresses = [];
+  List<Json> similar = [];
+  int pointGeneration = 0;
   bool geoBusy = false;
   @override
   void initState() {
@@ -70,7 +76,7 @@ class _CivicFormState extends State<CivicForm> {
   }
 
   Future<void> exit() async {
-    if (busy) return;
+    if (busy || photoBusy) return;
     final choice = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
@@ -112,7 +118,7 @@ class _CivicFormState extends State<CivicForm> {
   }
 
   Future<void> advance() async {
-    if (busy) return;
+    if (busy || photoBusy) return;
     if (draft.validate(step).isNotEmpty ||
         !widget.categories.any((c) => c.code == draft.category)) {
       setState(() => error = s.t('validation'));
@@ -173,6 +179,64 @@ class _CivicFormState extends State<CivicForm> {
       if (mounted) setState(() => error = BackendStrings(s.language).error(e));
     } finally {
       if (mounted) setState(() => geoBusy = false);
+    }
+  }
+
+  Future<void> inspectPoint() async {
+    if (draft.latitude == null || draft.longitude == null) return;
+    final generation = ++pointGeneration;
+    final latitude = draft.latitude,
+        longitude = draft.longitude,
+        category = draft.category;
+    final previousAddress = address.text;
+    try {
+      final point =
+          await ContractApi(widget.api).call(
+                ApiContract.operation('GET', '/v1/geo/reverse'),
+                query: {
+                  'lat': draft.latitude,
+                  'lng': draft.longitude,
+                  'city_code': draft.city,
+                },
+              )
+              as Json;
+      if (!mounted || generation != pointGeneration || !editable) return;
+      if (draft.latitude == latitude &&
+          draft.longitude == longitude &&
+          !draft.confirmed &&
+          address.text == previousAddress) {
+        setState(() {
+          address.text = point['address_text'];
+          changed();
+        });
+      }
+    } catch (e) {
+      if (mounted && generation == pointGeneration) {
+        setState(() => error = BackendStrings(s.language).error(e));
+      }
+    }
+    if (category != null &&
+        draft.latitude == latitude &&
+        draft.longitude == longitude) {
+      try {
+        final result =
+            await ContractApi(widget.api).call(
+                  ApiContract.operation('GET', '/v1/problems/similar'),
+                  query: {
+                    'lat': draft.latitude,
+                    'lng': draft.longitude,
+                    'category_code': category,
+                  },
+                )
+                as List;
+        if (mounted && generation == pointGeneration) {
+          setState(() => similar = result.cast<Json>());
+        }
+      } catch (e) {
+        if (mounted && generation == pointGeneration) {
+          setState(() => error = BackendStrings(s.language).error(e));
+        }
+      }
     }
   }
 
@@ -280,6 +344,20 @@ class _CivicFormState extends State<CivicForm> {
               onChanged: (_) => changed(),
             ),
           ],
+          if (step == 0)
+            MediaAttachments(
+              api: widget.api,
+              strings: ServiceStrings(s.language),
+              ids: draft.mediaIds,
+              onBusyChanged: (value) {
+                if (mounted) setState(() => photoBusy = value);
+              },
+              enabled: editable,
+              onChanged: (ids) {
+                draft.mediaIds = ids;
+                changed();
+              },
+            ),
           if (step == 1) ...[
             TextField(
               controller: address,
@@ -330,7 +408,9 @@ class _CivicFormState extends State<CivicForm> {
                     draft.latitude = p.latitude;
                     draft.longitude = p.longitude;
                     draft.confirmed = false;
+                    similar = [];
                     changed();
+                    inspectPoint();
                   },
                 ),
               ),
@@ -353,6 +433,30 @@ class _CivicFormState extends State<CivicForm> {
                     }
                   : null,
             ),
+          ],
+          if (step >= 1 && similar.isNotEmpty) ...[
+            Text(ServiceStrings(s.language).t('similar')),
+            for (final item in similar)
+              ListTile(
+                title: Text(item['title']),
+                subtitle: Text(item['address_text']),
+                onTap: busy
+                    ? null
+                    : () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ServiceEntityPage(
+                            api: widget.api,
+                            strings: ServiceStrings(s.language),
+                            source: ApiContract.operation(
+                              'GET',
+                              '/v1/problems/similar',
+                            ),
+                            item: item,
+                          ),
+                        ),
+                      ),
+              ),
           ],
           if (step == 2) ...[
             Panel(
@@ -418,7 +522,7 @@ class _CivicFormState extends State<CivicForm> {
               : 'continue',
         ),
         onPressed: advance,
-        busy: busy,
+        busy: busy || photoBusy,
         hint: s.t('draftSaved'),
       ),
     ),

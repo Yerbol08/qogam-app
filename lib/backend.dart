@@ -1,3 +1,4 @@
+import 'package:http_parser/http_parser.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
@@ -5,6 +6,17 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 typedef Json = Map<String, dynamic>;
+
+class ApiUpload {
+  final List<int> bytes;
+  final String filename, clientMediaId, kind;
+  const ApiUpload({
+    required this.bytes,
+    required this.filename,
+    required this.clientMediaId,
+    this.kind = 'photo',
+  });
+}
 
 class ApiException implements Exception {
   final int status;
@@ -162,9 +174,11 @@ class QogamApi extends ChangeNotifier {
   final SessionStore store;
   final DateTime Function() now;
   final Duration timeout;
+  final String? deviceId;
   String language;
   ApiSession? _session;
   ApiSession? get session => _session;
+  bool get mfa => _session?._json['mfa'] == true;
   ApiUser? get user => _session?.user;
   Future<void> _tail = Future.value();
   bool _disposed = false;
@@ -173,6 +187,7 @@ class QogamApi extends ChangeNotifier {
     required this.store,
     http.Client? client,
     this.language = 'ru',
+    this.deviceId,
     DateTime Function()? now,
     this.timeout = const Duration(seconds: 15),
   }) : baseUri = Uri.parse(baseUrl),
@@ -232,8 +247,38 @@ class QogamApi extends ChangeNotifier {
     Json? body,
     String? token,
     Map<String, String>? headers,
+    ApiUpload? upload,
   }) async {
-    final request = http.Request(method, baseUri.resolve(path))
+    if (upload != null &&
+        (upload.bytes.isEmpty ||
+            upload.bytes.length > 10 * 1024 * 1024 ||
+            !['photo', 'result_photo'].contains(upload.kind))) {
+      throw const ApiException(422, 'http', fields: ['file']);
+    }
+    final http.BaseRequest request = upload == null
+        ? http.Request(method, baseUri.resolve(path))
+        : (http.MultipartRequest(method, baseUri.resolve(path))
+            ..fields.addAll({
+              'client_media_id': upload.clientMediaId,
+              'kind': upload.kind,
+            })
+            ..files.add(
+              http.MultipartFile.fromBytes(
+                'file',
+                upload.bytes,
+                filename: upload.filename,
+                contentType: MediaType(
+                  'image',
+                  upload.filename.toLowerCase().endsWith('.png')
+                      ? 'png'
+                      : upload.filename.toLowerCase().endsWith('.heic') ||
+                            upload.filename.toLowerCase().endsWith('.heif')
+                      ? 'heic'
+                      : 'jpeg',
+                ),
+              ),
+            ));
+    request
       ..followRedirects = false
       ..headers['Accept'] = 'application/json'
       ..headers['Accept-Language'] = language;
@@ -241,7 +286,7 @@ class QogamApi extends ChangeNotifier {
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
-      request.body = jsonEncode(body);
+      (request as http.Request).body = jsonEncode(body);
     }
     http.Response response;
     try {
@@ -326,6 +371,7 @@ class QogamApi extends ChangeNotifier {
     String path, {
     Json? body,
     Map<String, String>? headers,
+    ApiUpload? upload,
   }) async {
     if (_session == null) throw const ApiException(401, 'session');
     bool refreshed = false;
@@ -340,6 +386,7 @@ class QogamApi extends ChangeNotifier {
         body: body,
         token: _session!.access,
         headers: headers,
+        upload: upload,
       );
     } on ApiException catch (e) {
       if (e.status != 401) rethrow;
@@ -355,6 +402,7 @@ class QogamApi extends ChangeNotifier {
           body: body,
           token: _session!.access,
           headers: headers,
+          upload: upload,
         );
       } on ApiException catch (retry) {
         if (retry.status == 401) await _clear();
@@ -374,28 +422,56 @@ class QogamApi extends ChangeNotifier {
     Map<String, String?> query = const {},
     bool authenticated = false,
     String? idempotencyKey,
+    Map<String, String> headers = const {},
+    ApiUpload? upload,
   }) {
     if (!path.startsWith('/v1/') || path.contains('?') || path.contains('#')) {
       throw ArgumentError('Expected a versioned API path');
     }
-    final uri = Uri(
-      path: path,
+    final uri = Uri.parse(path).replace(
       queryParameters: {
         for (final entry in query.entries)
           if (entry.value != null) entry.key: entry.value!,
       },
     );
-    final headers = {'Idempotency-Key': ?idempotencyKey};
-    return authenticated
-        ? _serial(
-            () => _authorizedUnlocked(
+    final requestHeaders = {...headers, 'Idempotency-Key': ?idempotencyKey};
+    Future<dynamic> perform() async {
+      final result = authenticated
+          ? await _authorizedUnlocked(
               method,
               uri.toString(),
               body: body,
-              headers: headers,
-            ),
-          )
-        : _send(method, uri.toString(), body: body, headers: headers);
+              headers: requestHeaders,
+              upload: upload,
+            )
+          : await _send(
+              method,
+              uri.toString(),
+              body: body,
+              headers: requestHeaders,
+              upload: upload,
+            );
+      if (method == 'POST' &&
+          [
+            '/v1/auth/otp/verify',
+            '/v1/auth/refresh',
+            '/v1/auth/mfa/confirm',
+          ].contains(path)) {
+        await _save(ApiSession.fromTokens(result as Json, now()));
+      } else if (path == '/v1/me' &&
+          ['GET', 'PATCH'].contains(method) &&
+          _session != null) {
+        await _save(_session!.withUser(result as Json));
+      } else if ((path == '/v1/me' && method == 'DELETE') ||
+          path == '/v1/auth/logout') {
+        await _clear();
+      }
+      return result;
+    }
+
+    return authenticated || path.startsWith('/v1/auth/')
+        ? _serial(perform)
+        : perform();
   }
 
   Future<List<ApiCategory>> categories() async =>
@@ -406,19 +482,26 @@ class QogamApi extends ChangeNotifier {
       (await _send('GET', '/v1/cities') as List)
           .map((j) => ApiCity.fromJson(j as Json))
           .toList();
-  Future<void> requestOtp(String phone) async {
+  Future<int> requestOtp(String phone) async {
     if (!RegExp(r'^\+77\d{9}$').hasMatch(phone)) {
       throw const ApiException(422, 'phone');
     }
-    await _send('POST', '/v1/auth/otp/request', body: {'phone': phone});
+    final response = await _send(
+      'POST',
+      '/v1/auth/otp/request',
+      body: {'phone': phone},
+      headers: {'X-Device-Id': ?deviceId},
+    );
+    return response is Map ? response['retry_after'] as int : 60;
   }
 
   Future<void> verifyOtp(
     String phone,
     String code,
     String version,
-    Set<String> consents,
-  ) => _serial(() async {
+    Set<String> consents, {
+    String? totp,
+  }) => _serial(() async {
     if (!RegExp(r'^\+77\d{9}$').hasMatch(phone)) {
       throw const ApiException(422, 'phone');
     }
@@ -438,6 +521,7 @@ class QogamApi extends ChangeNotifier {
         'code': code,
         'consent_version': version,
         'consents': consents.toList(),
+        'totp': ?totp,
       },
     );
     await _save(ApiSession.fromTokens(j as Json, now()));

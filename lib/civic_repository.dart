@@ -15,12 +15,14 @@ class CivicPage {
 class CivicDraft {
   String id, city, description, title, address;
   String? category;
+  List<String> mediaIds;
   double? latitude, longitude;
   bool confirmed, consent, uncertain;
   CivicDraft({
     String? id,
     this.city = 'astana',
     this.category,
+    List<String>? mediaIds,
     this.description = '',
     this.title = '',
     this.address = '',
@@ -29,11 +31,13 @@ class CivicDraft {
     this.confirmed = false,
     this.consent = false,
     this.uncertain = false,
-  }) : id = id ?? const Uuid().v4();
+  }) : id = id ?? const Uuid().v4(),
+       mediaIds = mediaIds ?? [];
   factory CivicDraft.fromJson(Json j) => CivicDraft(
     id: j['client_request_id'],
     city: j['city_code'],
     category: j['category_code'],
+    mediaIds: (j['media_ids'] as List? ?? []).cast<String>(),
     description: j['description'],
     title: j['title'] ?? '',
     address: j['address_text'],
@@ -53,7 +57,7 @@ class CivicDraft {
     'location': {'lat': latitude, 'lng': longitude},
     'location_confirmed': confirmed,
     'publication_confirmed': consent,
-    'media_ids': <String>[],
+    'media_ids': [...mediaIds],
   };
   Json stored() => {...payload(), 'uncertain': uncertain};
   List<String> validate(int step) => [
@@ -76,6 +80,7 @@ class CivicDraft {
             longitude! > 180))
       'place',
     if (step >= 2 && !consent) 'consent',
+    if (mediaIds.length > 5) 'media',
   ];
 }
 

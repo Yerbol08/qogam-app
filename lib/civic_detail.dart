@@ -1,3 +1,6 @@
+import 'api_contract.dart';
+import 'service_pages.dart';
+import 'service_strings.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'backend.dart';
@@ -89,34 +92,6 @@ class _CivicDetailState extends State<CivicDetail> {
       : DateFormat.yMMMd(
           s.language,
         ).add_Hm().format(DateTime.parse(value).toLocal());
-  Future<String?> textInput(String heading, {int max = 2000}) async {
-    final controller = TextEditingController();
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(heading),
-        content: TextField(
-          controller: controller,
-          minLines: 3,
-          maxLines: 6,
-          maxLength: max,
-          decoration: InputDecoration(labelText: s.t('explanation')),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(s.t('cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: Text(s.t('send')),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    return result;
-  }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -193,20 +168,21 @@ class _CivicDetailState extends State<CivicDetail> {
               onPressed: acting
                   ? null
                   : () async {
-                      final text = await textInput(s.t('clarify'));
-                      if (text == null || text.isEmpty || !mounted) return;
-                      await action(() async {
-                        await widget.api.request(
+                      await openService(
+                        context,
+                        widget.api,
+                        ServiceStrings(s.language),
+                        ApiContract.operation(
                           'POST',
-                          '/v1/me/reports/${widget.id}/clarifications',
-                          authenticated: true,
-                          body: {
-                            'expected_revision': data!['revision'],
-                            'text': text,
-                            'media_ids': <String>[],
-                          },
-                        );
-                      });
+                          '/v1/me/reports/{report_id}/clarifications',
+                        ),
+                        path: {'report_id': widget.id},
+                        seed: {
+                          'expected_revision': data!['revision'],
+                          'media_ids': <String>[],
+                        },
+                      );
+                      if (mounted) await load();
                     },
               child: Text(s.t('clarify')),
             ),
@@ -263,20 +239,21 @@ class _CivicDetailState extends State<CivicDetail> {
                 onPressed: acting
                     ? null
                     : () async {
-                        final text = await textInput(s.t('stillPresent'));
-                        if (text == null || text.isEmpty || !mounted) return;
-                        await action(() async {
-                          await widget.api.request(
+                        await openService(
+                          context,
+                          widget.api,
+                          ServiceStrings(s.language),
+                          ApiContract.operation(
                             'POST',
-                            '/v1/problems/${widget.id}/feedback',
-                            authenticated: true,
-                            body: {
-                              'outcome': 'still_present',
-                              'text': text,
-                              'media_ids': <String>[],
-                            },
-                          );
-                        });
+                            '/v1/problems/{problem_id}/feedback',
+                          ),
+                          path: {'problem_id': widget.id},
+                          seed: {
+                            'outcome': 'still_present',
+                            'media_ids': <String>[],
+                          },
+                        );
+                        if (mounted) await load();
                       },
                 child: Text(s.t('stillPresent')),
               ),
@@ -285,20 +262,50 @@ class _CivicDetailState extends State<CivicDetail> {
               onPressed: acting
                   ? null
                   : () async {
-                      final text = await textInput(s.t('flag'), max: 1000);
-                      if (text == null || text.isEmpty || !mounted) return;
-                      await action(() async {
-                        await widget.api.request(
+                      await openService(
+                        context,
+                        widget.api,
+                        ServiceStrings(s.language),
+                        ApiContract.operation(
                           'POST',
-                          '/v1/problems/${widget.id}/flags',
-                          authenticated: true,
-                          body: {'reason_code': 'other', 'text': text},
-                        );
-                      });
+                          '/v1/problems/{problem_id}/flags',
+                        ),
+                        path: {'problem_id': widget.id},
+                      );
+                      if (mounted) await load();
                     },
               child: Text(s.t('flag')),
             ),
           ],
+          if (widget.own &&
+              ['submitted', 'needs_info'].contains(data!['moderation_state']))
+            OutlinedButton.icon(
+              icon: const Icon(Icons.edit_outlined),
+              label: Text(ServiceStrings(s.language).t('edit')),
+              onPressed: acting
+                  ? null
+                  : () async {
+                      await openService(
+                        context,
+                        widget.api,
+                        ServiceStrings(s.language),
+                        ApiContract.operation(
+                          'PATCH',
+                          '/v1/me/reports/{report_id}',
+                        ),
+                        path: {'report_id': widget.id},
+                        seed: {
+                          ...data!,
+                          'expected_revision': data!['revision'],
+                          'media_ids': [
+                            for (final m in data!['media'] as List? ?? [])
+                              m['id'],
+                          ],
+                        },
+                      );
+                      if (mounted) await load();
+                    },
+            ),
           PageHeading(s.t('history')),
           for (final event in history?.items ?? <Json>[])
             Panel(
@@ -378,14 +385,17 @@ class _CivicDetailState extends State<CivicDetail> {
     ),
     bottomNavigationBar: !widget.own && data != null
         ? BottomAction(
-            label: s.t(data!['joined_by_me'] == true ? 'joined' : 'join'),
+            label: data!['joined_by_me'] == true
+                ? ServiceStrings(s.language).t('unjoin')
+                : s.t('join'),
             busy: acting,
-            onPressed: data!['joined_by_me'] == true
-                ? null
-                : () => action(() async {
-                    final result = await widget.repo.join(widget.id);
-                    if (mounted) setState(() => data = {...data!, ...result});
-                  }),
+            onPressed: () => action(() async {
+              final result = await widget.repo.join(
+                widget.id,
+                undo: data!['joined_by_me'] == true,
+              );
+              if (mounted) setState(() => data = {...data!, ...result});
+            }),
           )
         : null,
   );

@@ -1,3 +1,5 @@
+import 'service_pages.dart';
+import 'service_strings.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
@@ -210,6 +212,55 @@ class _BackendProfileState extends State<BackendProfile> {
             ),
           ),
           tile(
+            Icons.apps_outlined,
+            'services',
+            () => open(
+              ServiceCatalog(
+                api: widget.api,
+                strings: ServiceStrings(b.language),
+              ),
+            ),
+          ),
+          if ([
+            'moderator',
+            'org_staff',
+            'org_admin',
+            'platform_admin',
+          ].contains(user.role)) ...[
+            tile(
+              Icons.security_outlined,
+              'mfaSetup',
+              () => open(
+                MfaPage(api: widget.api, strings: ServiceStrings(b.language)),
+              ),
+            ),
+            if (widget.api.mfa)
+              tile(
+                Icons.work_outline,
+                'staffCabinet',
+                () => open(
+                  ServiceCatalog(
+                    api: widget.api,
+                    strings: ServiceStrings(b.language),
+                    mode: 'staff',
+                  ),
+                ),
+              ),
+            if (widget.api.mfa &&
+                ['platform_admin', 'moderator'].contains(user.role))
+              tile(
+                Icons.admin_panel_settings_outlined,
+                'adminCabinet',
+                () => open(
+                  ServiceCatalog(
+                    api: widget.api,
+                    strings: ServiceStrings(b.language),
+                    mode: 'admin',
+                  ),
+                ),
+              ),
+          ],
+          tile(
             Icons.place_outlined,
             'places',
             () => open(
@@ -355,7 +406,9 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  final phone = TextEditingController(), code = TextEditingController();
+  final phone = TextEditingController(),
+      code = TextEditingController(),
+      totp = TextEditingController();
   BackendStrings get b => widget.b;
   ApiMeta? meta;
   List<Json> legal = [];
@@ -424,18 +477,19 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> send() => action(() async {
     final number = phone.text.replaceAll(RegExp(r'[\s()\-]'), '');
-    await widget.api.requestOtp(number);
+    final retryAfter = await widget.api.requestOtp(number);
     if (mounted) {
       phone.text = number;
       sent = true;
       code.clear();
-      startCooldown(60);
+      startCooldown(retryAfter);
     }
   });
   @override
   void dispose() {
     timer?.cancel();
     phone.dispose();
+    totp.dispose();
     code.dispose();
     super.dispose();
   }
@@ -516,6 +570,15 @@ class _LoginPageState extends State<LoginPage> {
               }
             },
           ),
+        if (sent)
+          TextField(
+            controller: totp,
+            enabled: !busy,
+            maxLength: 6,
+            keyboardType: TextInputType.number,
+            obscureText: true,
+            decoration: InputDecoration(labelText: b.t('totp')),
+          ),
         if (meta != null)
           Panel(
             child: Column(
@@ -563,6 +626,7 @@ class _LoginPageState extends State<LoginPage> {
                       code.text.trim(),
                       meta!.consentVersion,
                       consents,
+                      totp: totp.text.trim().isEmpty ? null : totp.text.trim(),
                     );
                     if (context.mounted) Navigator.pop(context);
                   });

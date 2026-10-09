@@ -1,3 +1,4 @@
+import 'package:uuid/uuid.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -16,8 +17,11 @@ import 'civic_home.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final p = await SharedPreferences.getInstance();
+  final deviceId = p.getString('installation.id') ?? const Uuid().v4();
+  await p.setString('installation.id', deviceId);
   final api = QogamApi(
     store: SecureSessionStore(QogamApi.defaultBaseUrl),
+    deviceId: deviceId,
     language: p.getString('language') ?? 'ru',
   );
   runApp(
