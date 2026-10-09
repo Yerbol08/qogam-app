@@ -11,7 +11,7 @@ class ApiException implements Exception {
   final String kind;
   final List<String> fields;
   final int? retryAfter;
-  final String? code, requestId;
+  final String? code, requestId, message;
   const ApiException(
     this.status,
     this.kind, {
@@ -19,6 +19,7 @@ class ApiException implements Exception {
     this.retryAfter,
     this.code,
     this.requestId,
+    this.message,
   });
 }
 
@@ -230,11 +231,13 @@ class QogamApi extends ChangeNotifier {
     String path, {
     Json? body,
     String? token,
+    Map<String, String>? headers,
   }) async {
     final request = http.Request(method, baseUri.resolve(path))
       ..followRedirects = false
       ..headers['Accept'] = 'application/json'
       ..headers['Accept-Language'] = language;
+    if (headers != null) request.headers.addAll(headers);
     if (token != null) request.headers['Authorization'] = 'Bearer $token';
     if (body != null) {
       request.headers['Content-Type'] = 'application/json';
@@ -286,9 +289,12 @@ class QogamApi extends ChangeNotifier {
             int.tryParse(response.headers['retry-after'] ?? '') ??
             (data is Map ? data['retry_after'] as int? : null),
         code: data is Map ? data['code'] as String? : null,
+        message: data is Map ? data['message'] as String? : null,
         requestId:
             response.headers['x-request-id'] ??
-            (data is Map ? data['request_id'] as String? : null),
+            (data is Map
+                ? (data['trace_id'] ?? data['request_id']) as String?
+                : null),
       );
     }
     return data;
@@ -319,6 +325,7 @@ class QogamApi extends ChangeNotifier {
     String method,
     String path, {
     Json? body,
+    Map<String, String>? headers,
   }) async {
     if (_session == null) throw const ApiException(401, 'session');
     bool refreshed = false;
@@ -327,7 +334,13 @@ class QogamApi extends ChangeNotifier {
       refreshed = true;
     }
     try {
-      return await _send(method, path, body: body, token: _session!.access);
+      return await _send(
+        method,
+        path,
+        body: body,
+        token: _session!.access,
+        headers: headers,
+      );
     } on ApiException catch (e) {
       if (e.status != 401) rethrow;
       if (refreshed) {
@@ -336,7 +349,13 @@ class QogamApi extends ChangeNotifier {
       }
       await _refresh();
       try {
-        return await _send(method, path, body: body, token: _session!.access);
+        return await _send(
+          method,
+          path,
+          body: body,
+          token: _session!.access,
+          headers: headers,
+        );
       } on ApiException catch (retry) {
         if (retry.status == 401) await _clear();
         rethrow;
@@ -346,6 +365,39 @@ class QogamApi extends ChangeNotifier {
 
   Future<ApiMeta> meta() async =>
       ApiMeta.fromJson(await _send('GET', '/v1/meta') as Json);
+
+  /// Versioned JSON operations share session rotation, errors and origin restrictions.
+  Future<dynamic> request(
+    String method,
+    String path, {
+    Json? body,
+    Map<String, String?> query = const {},
+    bool authenticated = false,
+    String? idempotencyKey,
+  }) {
+    if (!path.startsWith('/v1/') || path.contains('?') || path.contains('#')) {
+      throw ArgumentError('Expected a versioned API path');
+    }
+    final uri = Uri(
+      path: path,
+      queryParameters: {
+        for (final entry in query.entries)
+          if (entry.value != null) entry.key: entry.value!,
+      },
+    );
+    final headers = {'Idempotency-Key': ?idempotencyKey};
+    return authenticated
+        ? _serial(
+            () => _authorizedUnlocked(
+              method,
+              uri.toString(),
+              body: body,
+              headers: headers,
+            ),
+          )
+        : _send(method, uri.toString(), body: body, headers: headers);
+  }
+
   Future<List<ApiCategory>> categories() async =>
       (await _send('GET', '/v1/categories') as List)
           .map((j) => ApiCategory.fromJson(j as Json))

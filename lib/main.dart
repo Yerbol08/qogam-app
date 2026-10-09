@@ -11,6 +11,7 @@ import 'report_form.dart';
 import 'backend.dart';
 import 'backend_pages.dart';
 import 'backend_strings.dart';
+import 'civic_home.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,7 +20,13 @@ Future<void> main() async {
     store: SecureSessionStore(QogamApi.defaultBaseUrl),
     language: p.getString('language') ?? 'ru',
   );
-  runApp(QogamApp(preferences: p, repository: DemoRepository(p), api: api));
+  runApp(
+    QogamApp(
+      preferences: p,
+      repository: DemoRepository(p),
+      api: const bool.fromEnvironment('QOGAM_DEMO') ? null : api,
+    ),
+  );
 }
 
 class QogamApp extends StatefulWidget {
@@ -48,18 +55,31 @@ class _QogamAppState extends State<QogamApp> {
     supportedLocales: const [Locale('ru'), Locale('kk')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: qogamTheme(),
-    home: Home(
-      repository: widget.repository,
-      api: widget.api,
-      tilesEnabled: widget.mapTilesEnabled,
-      s: Strings(language),
-      changeLanguage: () async {
-        final next = language == 'ru' ? 'kk' : 'ru';
-        await widget.preferences.setString('language', next);
-        widget.api?.language = next;
-        setState(() => language = next);
-      },
-    ),
+    home: widget.api != null
+        ? CivicHome(
+            api: widget.api!,
+            preferences: widget.preferences,
+            strings: Strings(language),
+            changeLanguage: () async {
+              final next = language == 'ru' ? 'kk' : 'ru';
+              await widget.preferences.setString('language', next);
+              widget.api!.language = next;
+              if (mounted) setState(() => language = next);
+            },
+            tilesEnabled: widget.mapTilesEnabled,
+          )
+        : Home(
+            repository: widget.repository,
+            api: widget.api,
+            tilesEnabled: widget.mapTilesEnabled,
+            s: Strings(language),
+            changeLanguage: () async {
+              final next = language == 'ru' ? 'kk' : 'ru';
+              await widget.preferences.setString('language', next);
+              widget.api?.language = next;
+              setState(() => language = next);
+            },
+          ),
   );
 }
 

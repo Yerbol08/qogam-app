@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'backend.dart';
 import 'backend_strings.dart';
 import 'nearby.dart';
@@ -57,12 +58,15 @@ class BackendProfile extends StatefulWidget {
   final Strings s;
   final VoidCallback changeLanguage;
   final bool tilesEnabled;
+  final bool demoFeatures, restoreSession;
   const BackendProfile({
     super.key,
     required this.api,
     required this.s,
     required this.changeLanguage,
     this.tilesEnabled = true,
+    this.demoFeatures = true,
+    this.restoreSession = true,
   });
   @override
   State<BackendProfile> createState() => _BackendProfileState();
@@ -90,7 +94,7 @@ class _BackendProfileState extends State<BackendProfile> {
 
   Future<void> initialize() async {
     await run(() async {
-      await widget.api.restore();
+      if (widget.restoreSession) await widget.api.restore();
       if (widget.api.user != null) profile = await widget.api.getMe();
     });
   }
@@ -166,7 +170,13 @@ class _BackendProfileState extends State<BackendProfile> {
                 ),
               if (user == null && !busy)
                 FilledButton.icon(
-                  onPressed: () => open(LoginPage(api: widget.api, b: b)),
+                  onPressed: () => open(
+                    LoginPage(
+                      api: widget.api,
+                      b: b,
+                      legalRequired: !widget.demoFeatures,
+                    ),
+                  ),
                   icon: const Icon(Icons.login_rounded),
                   label: Text(b.t('login')),
                 ),
@@ -275,7 +285,10 @@ class _BackendProfileState extends State<BackendProfile> {
           ),
         ),
         Panel(
-          child: Text(b.t('demoNotice'), style: const TextStyle(color: muted)),
+          child: Text(
+            b.t(widget.demoFeatures ? 'demoNotice' : 'serverNotice'),
+            style: const TextStyle(color: muted),
+          ),
         ),
         if (user != null) ...[
           OutlinedButton.icon(
@@ -330,7 +343,13 @@ class _BackendProfileState extends State<BackendProfile> {
 class LoginPage extends StatefulWidget {
   final QogamApi api;
   final BackendStrings b;
-  const LoginPage({super.key, required this.api, required this.b});
+  final bool legalRequired;
+  const LoginPage({
+    super.key,
+    required this.api,
+    required this.b,
+    this.legalRequired = false,
+  });
   @override
   State<LoginPage> createState() => _LoginPageState();
 }
@@ -339,6 +358,7 @@ class _LoginPageState extends State<LoginPage> {
   final phone = TextEditingController(), code = TextEditingController();
   BackendStrings get b => widget.b;
   ApiMeta? meta;
+  List<Json> legal = [];
   final consents = <String>{};
   bool sent = false, busy = false;
   String? error;
@@ -351,7 +371,19 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> loadMeta() => action(() async {
-    meta = await widget.api.meta();
+    final next = await widget.api.meta();
+    final docs = widget.legalRequired
+        ? await widget.api.request(
+                'GET',
+                '/v1/legal/documents',
+                query: {'language': b.language},
+              )
+              as List
+        : <Json>[];
+    if (mounted) {
+      meta = next;
+      legal = docs.cast<Json>();
+    }
   });
   Future<void> action(Future<void> Function() callback) async {
     if (busy) return;
@@ -455,6 +487,35 @@ class _LoginPageState extends State<LoginPage> {
             ),
           ),
         ],
+        for (final document in legal)
+          TextButton.icon(
+            icon: const Icon(Icons.description_outlined),
+            label: Text(document['title']),
+            onPressed: () async {
+              if (document['body'] != null) {
+                await showDialog(
+                  context: context,
+                  builder: (context) => AlertDialog(
+                    title: Text(document['title']),
+                    content: SingleChildScrollView(
+                      child: SelectableText(document['body']),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(b.t('cancel')),
+                      ),
+                    ],
+                  ),
+                );
+              } else if (document['url'] != null) {
+                final url = Uri.tryParse(document['url']);
+                if (url != null && ['http', 'https'].contains(url.scheme)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+              }
+            },
+          ),
         if (meta != null)
           Panel(
             child: Column(

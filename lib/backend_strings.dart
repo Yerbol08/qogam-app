@@ -11,6 +11,9 @@ class BackendStrings {
       return t('badCode');
     }
     if (error.kind != 'http') return t(error.kind);
+    if (error.message != null && error.message!.isNotEmpty) {
+      return error.message!;
+    }
     return switch (error.status) {
       400 => t('invalidRequest'),
       401 => t('session'),
@@ -25,6 +28,8 @@ class BackendStrings {
   }
 
   static const ru = {
+    'serverNotice':
+        'Обращения поступают на сервер. До модерации они доступны только автору и уполномоченным сотрудникам.',
     'cityCode': 'Код города (из справочника)',
     'addressLabel': 'Адрес',
     'notificationsOn': 'Уведомления для места включены',
@@ -124,6 +129,8 @@ class BackendStrings {
     'unexpected': 'Не удалось выполнить действие. Попробуйте ещё раз.',
   };
   static const kk = {
+    'serverNotice':
+        'Өтініштер серверге жіберіледі. Модерацияға дейін оларды тек автор мен уәкілетті қызметкерлер көреді.',
     'cityCode': 'Қала коды (анықтамалықтан)',
     'addressLabel': 'Мекенжай',
     'notificationsOn': 'Орын хабарламалары қосылған',
